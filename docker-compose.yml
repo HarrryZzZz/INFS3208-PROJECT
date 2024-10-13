@@ -1,0 +1,106 @@
+version: "3.3"
+
+volumes:
+    hadoop_namenode:
+    hadoop_datanode:
+    hadoop_historyserver:
+
+networks:
+    spark-net:
+        driver: bridge
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    networks:
+      - spark-net
+    ports:
+      - "9870:9870"  # HDFS Web UI
+      - "9000:9000"  # HDFS通信端口
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./data:/home/data  # 数据挂载路径
+    environment:
+      - CLUSTER_NAME=hadoop-cluster
+    env_file:
+      - ./hadoop.env
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    networks:
+        - spark-net
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    env_file:
+      - ./hadoop.env
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    depends_on:
+      - namenode
+      - datanode
+    networks:
+      - spark-net
+    ports:
+      - "8088:8088"  # YARN ResourceManager Web UI
+    env_file:
+      - ./hadoop.env
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: historyserver
+    depends_on:
+      - namenode
+      - datanode
+    networks:
+      - spark-net
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    env_file:
+      - ./hadoop.env
+
+  spark-master:
+    image: bde2020/spark-master:3.0.0-hadoop3.2
+    container_name: spark-master
+    depends_on:
+      - namenode
+    networks:
+      - spark-net
+    ports:
+      - "8080:8080"  # Spark Master Web UI
+      - "7077:7077"  # Spark通信端口
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+
+  spark-worker:
+    image: bde2020/spark-worker:3.0.0-hadoop3.2
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    networks:
+      - spark-net
+    ports:
+      - "8081:8081"  # Spark Worker Web UI
+    environment:
+      - "SPARK_MASTER=spark://spark-master:7077"
+      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=512m
+
+  jupyter-notebook:
+    container_name: jupyternb
+    image: jupyter/all-spark-notebook:42f4c82a07ff
+    depends_on:
+      - spark-master
+    networks:
+      - spark-net
+    ports:
+      - "8888:8888"  # Jupyter Notebook Web UI
+    volumes:
+      - ./nbs:/home/jovyan/work/nbs  # 挂载你的notebook目录
+      - ./data:/home/jovyan/work/data  # 挂载你的CSV数据文件
+    command: bash -c "pip install gdown faiss-cpu && start-notebook.sh --ip=0.0.0.0 --allow-root --NotebookApp.token=''"
